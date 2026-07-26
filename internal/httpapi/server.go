@@ -17,6 +17,7 @@ import (
 
 	"github.com/augusto-dmh/drover"
 
+	"github.com/augusto-dmh/herald/internal/herald"
 	"github.com/augusto-dmh/herald/internal/store"
 )
 
@@ -72,6 +73,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // as missing in the same JSON shape as every other error.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+
+	mux.Handle("POST /v1/tenants", s.requireBootstrapToken(s.createTenant))
+	mux.Handle("POST /v1/applications", s.requireKey(herald.ScopeFull, s.createApplication))
+	mux.Handle("POST /v1/applications/{uid}/endpoints", s.requireKey(herald.ScopeFull, s.createEndpoint))
+	mux.Handle("GET /v1/applications/{uid}/messages/{id}", s.requireKey(herald.ScopeFull, s.showMessage))
+
 	mux.Handle("/", s.handle(func(http.ResponseWriter, *http.Request) error {
 		return errNotFound
 	}))
