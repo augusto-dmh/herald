@@ -70,11 +70,13 @@ func (s Scope) Permits(want Scope) bool {
 type DeliveryStatus string
 
 const (
-	// DeliveryPending has not yet been attempted, or is between attempts.
+	// DeliveryPending has not been attempted yet.
 	DeliveryPending DeliveryStatus = "pending"
 	// DeliveryDelivered got a 2xx response.
 	DeliveryDelivered DeliveryStatus = "delivered"
-	// DeliveryFailed exhausted its chances without a 2xx response.
+	// DeliveryFailed did not. A delivery is attempted once, so this is
+	// where an attempt that was refused, redirected, timed out or never
+	// connected leaves it, and it is where the delivery stays.
 	DeliveryFailed DeliveryStatus = "failed"
 )
 
