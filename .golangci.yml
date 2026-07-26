@@ -10,12 +10,6 @@ linters:
     - misspell
     - sloglint
     - tparallel
-  exclusions:
-    rules:
-      # sqlc-generated code is not hand-maintained.
-      - path: internal/dbsqlc/
-        linters:
-          - all
 
 formatters:
   enable:

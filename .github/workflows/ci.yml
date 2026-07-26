@@ -12,19 +12,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job runs a Makefile target: the Makefile is the single source of
+# truth for what a gate is, and CI is one of its callers.
 jobs:
   unit:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go: ["1.25.x", "1.26.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go }}
-      - run: go vet ./...
-      - run: go test -race ./...
+          go-version: "1.26.x"
+      - run: make build
+      - run: make gate-quick
 
   integration:
     runs-on: ubuntu-latest
@@ -33,7 +32,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
-      - run: go test -race -tags=integration ./...
+      - run: make gate-integration
 
   lint:
     runs-on: ubuntu-latest
@@ -42,6 +41,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
+      # The action rather than `make lint`, for inline annotations on the
+      # diff. Its version must match GOLANGCI_LINT_VERSION in the
+      # Makefile — bump the two together.
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.2
@@ -53,4 +55,4 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - run: make vulncheck
