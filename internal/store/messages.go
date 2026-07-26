@@ -18,6 +18,11 @@ const (
 		`m.payload, m.created_at`
 )
 
+// A payload is written and read as plain bytes, never as a JSON type:
+// the column stores what the tenant sent and this layer must not be
+// the thing that changes it. The document was checked for validity
+// before it got here.
+
 func scanMessage(row pgx.Row) (herald.Message, error) {
 	var m herald.Message
 	var payload []byte
@@ -38,7 +43,7 @@ func (s *Store) CreateMessageTx(
 		INSERT INTO messages (id, tenant_id, application_id, event_type, payload)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING `+messageColumns,
-		m.ID, m.TenantID, m.ApplicationID, m.EventType, m.Payload))
+		m.ID, m.TenantID, m.ApplicationID, m.EventType, []byte(m.Payload)))
 	if err != nil {
 		return herald.Message{}, wrap("create message", err)
 	}

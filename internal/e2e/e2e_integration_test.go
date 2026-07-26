@@ -12,6 +12,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -19,7 +20,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -308,7 +308,12 @@ func TestAPostedMessageReachesItsEndpointAndTheAttemptIsQueryable(t *testing.T) 
 	key := s.tenant(t, "Acme", "billing")
 	endpointID := s.endpoint(t, key, "billing", endpoint.url)
 
-	payload := `{"invoice":"inv_1","total":1250,"currency":"BRL"}`
+	// A document nothing may quietly tidy: the keys are out of order,
+	// one of them is repeated, and the whitespace is the submitter's.
+	// Parsing and re-serializing this — which a JSON column would do —
+	// changes every one of those, and a signature over the tidied bytes
+	// would not verify against the bytes the tenant sent.
+	payload := `{"zebra":1,  "alpha":2,"zebra":3}`
 	var accepted acceptedMessage
 	s.expect(t, http.StatusAccepted, http.MethodPost, "/v1/applications/billing/messages",
 		key, `{"event_type":"invoice.paid","payload":`+payload+`}`, &accepted)
@@ -319,15 +324,17 @@ func TestAPostedMessageReachesItsEndpointAndTheAttemptIsQueryable(t *testing.T) 
 		t.Errorf("read back message %s (%s), want %s (invoice.paid)",
 			reported.ID, reported.EventType, accepted.ID)
 	}
-	var submitted, returned any
-	if err := json.Unmarshal([]byte(payload), &submitted); err != nil {
+
+	// The API answers with the stored document as JSON, not as an
+	// encoded blob. The one thing between it and the submitted bytes is
+	// the response encoder's whitespace compaction; key order and the
+	// repeated key — the things normalization destroys — must survive.
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, []byte(payload)); err != nil {
 		t.Fatalf("the submitted payload is not JSON: %v", err)
 	}
-	if err := json.Unmarshal(reported.Payload, &returned); err != nil {
-		t.Fatalf("the reported payload is not JSON: %v (%s)", err, reported.Payload)
-	}
-	if !reflect.DeepEqual(submitted, returned) {
-		t.Errorf("the API reports payload %s, want %s", reported.Payload, payload)
+	if !bytes.Equal(reported.Payload, compacted.Bytes()) {
+		t.Errorf("the API reports payload %s, want %s", reported.Payload, compacted.Bytes())
 	}
 
 	delivery := reported.Deliveries[0]
@@ -367,12 +374,11 @@ func TestAPostedMessageReachesItsEndpointAndTheAttemptIsQueryable(t *testing.T) 
 	if endpoint.method != http.MethodPost {
 		t.Errorf("the receiver was called with %s, want POST", endpoint.method)
 	}
-	var arrived any
-	if err := json.Unmarshal(endpoint.body, &arrived); err != nil {
-		t.Fatalf("the receiver did not get JSON: %v (%s)", err, endpoint.body)
-	}
-	if !reflect.DeepEqual(submitted, arrived) {
-		t.Errorf("the receiver got %s, want %s", endpoint.body, payload)
+	// Byte for byte, whitespace and repeated key included: what herald
+	// carries to an endpoint is what the tenant handed it, because that
+	// is what a signature will have to cover.
+	if !bytes.Equal(endpoint.body, []byte(payload)) {
+		t.Errorf("the receiver got %s, want the submitted bytes %s", endpoint.body, payload)
 	}
 
 	eventually(t, "the queue to finalize the job", func() bool {

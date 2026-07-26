@@ -244,7 +244,11 @@ func TestAMessageWithNoMatchingEndpointIsStoredWithNoDeliveries(t *testing.T) {
 	f := newTenant(t, s, "acme", "billing")
 	newEndpoint(t, s, f, "https://example.com/other", []string{"user.created"}, false)
 
-	message, deliveries := ingest(t, s, pool, f, "invoice.paid", `{"total":10}`)
+	// A document that would not survive being parsed and re-serialized:
+	// the keys are out of order, one is repeated, and the whitespace is
+	// the submitter's own.
+	submitted := `{"zebra":1,  "alpha":2,"zebra":3}`
+	message, deliveries := ingest(t, s, pool, f, "invoice.paid", submitted)
 	if len(deliveries) != 0 {
 		t.Errorf("ingest created %d deliveries, want 0", len(deliveries))
 	}
@@ -253,8 +257,8 @@ func TestAMessageWithNoMatchingEndpointIsStoredWithNoDeliveries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the stored message: %v", err)
 	}
-	if string(stored.Payload) != `{"total": 10}` && string(stored.Payload) != `{"total":10}` {
-		t.Errorf("payload came back as %s, want the submitted JSON", stored.Payload)
+	if string(stored.Payload) != submitted {
+		t.Errorf("payload came back as %s, want the submitted bytes %s", stored.Payload, submitted)
 	}
 	if stored.EventType != "invoice.paid" {
 		t.Errorf("event type came back as %q, want invoice.paid", stored.EventType)

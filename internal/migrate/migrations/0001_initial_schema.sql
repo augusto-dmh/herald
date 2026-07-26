@@ -81,12 +81,20 @@ CREATE TABLE endpoint_secrets (
 CREATE INDEX endpoint_secrets_endpoint_idx
   ON endpoint_secrets (tenant_id, endpoint_id, created_at DESC);
 
+-- payload holds the bytes the tenant submitted, exactly as they were
+-- submitted. It is deliberately not json or jsonb: those parse and
+-- re-serialize, which reorders keys, drops duplicates and rewrites
+-- whitespace, so what came back out would no longer be what came in.
+-- The document is validated as JSON at ingest, which is where a caller
+-- can still be told its body is unusable; from there on the bytes are
+-- carried through untouched, because a signature has to cover what the
+-- tenant actually sent.
 CREATE TABLE messages (
   id             uuid PRIMARY KEY,
   tenant_id      uuid NOT NULL REFERENCES tenants (id) ON DELETE CASCADE,
   application_id uuid NOT NULL REFERENCES applications (id) ON DELETE CASCADE,
   event_type     text NOT NULL,
-  payload        jsonb NOT NULL,
+  payload        bytea NOT NULL,
   created_at     timestamptz NOT NULL DEFAULT now()
 );
 

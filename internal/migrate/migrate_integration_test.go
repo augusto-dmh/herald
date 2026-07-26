@@ -3,6 +3,7 @@
 package migrate_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"slices"
@@ -102,8 +103,8 @@ func seed(t *testing.T, pool *pgxpool.Pool) seeded {
 	      VALUES ($1, $2, $3, 'https://example.com/hooks')`,
 		s.endpointID, s.tenantID, s.applicationID)
 	exec(`INSERT INTO messages (id, tenant_id, application_id, event_type, payload)
-	      VALUES ($1, $2, $3, 'invoice.paid', '{}'::jsonb)`,
-		s.messageID, s.tenantID, s.applicationID)
+	      VALUES ($1, $2, $3, 'invoice.paid', $4)`,
+		s.messageID, s.tenantID, s.applicationID, []byte(`{}`))
 	exec(`INSERT INTO deliveries (id, tenant_id, message_id, endpoint_id)
 	      VALUES ($1, $2, $3, $4)`,
 		s.deliveryID, s.tenantID, s.messageID, s.endpointID)
@@ -204,6 +205,45 @@ func TestAPIKeysHaveNowhereToStoreAPlaintextKey(t *testing.T) {
 	}
 	if err := insert(uuid.Must(uuid.NewV7())); err == nil {
 		t.Errorf("two keys with the same hash were accepted; authentication would be ambiguous")
+	}
+}
+
+// The bytes a tenant submitted are what herald delivers, hands back and
+// will one day sign. A json or jsonb column would parse and
+// re-serialize them — sorting keys, discarding duplicates, rewriting
+// whitespace — so the document that came back would not be the document
+// that came in.
+func TestAMessagePayloadIsKeptAsTheBytesThatWereSubmitted(t *testing.T) {
+	pool := migrated(t)
+	ctx := context.Background()
+
+	var dataType string
+	if err := pool.QueryRow(ctx, `
+		SELECT data_type FROM information_schema.columns
+		WHERE table_name = 'messages' AND column_name = 'payload'`).Scan(&dataType); err != nil {
+		t.Fatalf("read payload type: %v", err)
+	}
+	if dataType != "bytea" {
+		t.Errorf("payload is %s, want bytea so the submitted bytes survive", dataType)
+	}
+
+	// A document a JSON column would not have returned unchanged: keys
+	// out of order, a repeated key, and whitespace that means nothing to
+	// a parser and everything to a signature.
+	submitted := []byte(`{"zebra":1,  "alpha":2,"zebra":3}`)
+	s := seed(t, pool)
+	if _, err := pool.Exec(ctx,
+		`UPDATE messages SET payload = $2 WHERE id = $1`, s.messageID, submitted); err != nil {
+		t.Fatalf("store the submitted payload: %v", err)
+	}
+
+	var stored []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT payload FROM messages WHERE id = $1`, s.messageID).Scan(&stored); err != nil {
+		t.Fatalf("read the stored payload: %v", err)
+	}
+	if !bytes.Equal(stored, submitted) {
+		t.Errorf("payload came back as %s, want %s", stored, submitted)
 	}
 }
 
