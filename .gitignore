@@ -1,0 +1,14 @@
+# Build artifacts
+/bin/
+*.test
+*.out
+coverage.*
+
+# Ship-cycle heartbeat: session-scoped working state, meaningless in history
+.specs/.ship-status
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

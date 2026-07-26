@@ -1,0 +1,17 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - copyloopvar
+    - errname
+    - errorlint
+    - gosec
+    - misspell
+    - sloglint
+    - tparallel
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
