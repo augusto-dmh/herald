@@ -12,4 +12,4 @@ Workflow: RESEARCH → RFC/ADR → tlc-spec-driven cycle → IMPLEMENT → PR
 | `create-rfc` | New RFCs |
 | `grilling` | Stress-test a plan or decision before committing to it |
 
-Provenance: `tlc-spec-driven`, `create-adr`, `create-rfc` vendored via drover (originally Tech Leads Club); `grilling` community-sourced; `herald-ship-cycle`, `herald-finalize`, `pr-review` authored here, ported from a sibling project with all repo-specific facts isolated in each skill's "Project facts" section.
+Provenance: `tlc-spec-driven`, `create-adr`, `create-rfc` vendored (originally Tech Leads Club); `grilling` community-sourced; `herald-ship-cycle`, `herald-finalize`, `pr-review` authored for this repo, with all repo-specific facts isolated in each skill's "Project facts" section.
