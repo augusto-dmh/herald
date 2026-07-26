@@ -37,19 +37,6 @@ func createTenant(ctx context.Context, q querier, t herald.Tenant) (herald.Tenan
 	return out, nil
 }
 
-// TenantByID returns a tenant.
-func (s *Store) TenantByID(ctx context.Context, id uuid.UUID) (herald.Tenant, error) {
-	var out herald.Tenant
-	err := s.pool.QueryRow(ctx, `
-		SELECT `+tenantColumns+`
-		FROM tenants
-		WHERE id = $1`, id).Scan(&out.ID, &out.Name, &out.CreatedAt)
-	if err != nil {
-		return herald.Tenant{}, wrap("read tenant", err)
-	}
-	return out, nil
-}
-
 //nolint:gosec // G101: a column list, not a credential
 const apiKeyColumns = `id, tenant_id, key_hash, prefix, scope, last_used_at, created_at`
 

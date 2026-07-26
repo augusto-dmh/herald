@@ -246,6 +246,12 @@ func (s *Store) CreateAttempt(
 
 // AttemptsByMessage returns every attempt made for a message, across
 // all of its deliveries, in the order they happened.
+//
+// Both sides of the join are scoped to the tenant. Naming it on the
+// attempt alone would already be correct, since every attempt carries
+// the tenant of the delivery it belongs to — but the deliveries index
+// leads with tenant_id, so without the predicate the join has no index
+// to use and the correct answer is arrived at the slow way.
 func (s *Store) AttemptsByMessage(
 	ctx context.Context, tenantID, messageID uuid.UUID,
 ) ([]herald.DeliveryAttempt, error) {
@@ -253,7 +259,7 @@ func (s *Store) AttemptsByMessage(
 		SELECT `+attemptColumnsQualified+`
 		FROM delivery_attempts a
 		JOIN deliveries d ON d.id = a.delivery_id
-		WHERE a.tenant_id = $1 AND d.message_id = $2
+		WHERE a.tenant_id = $1 AND d.tenant_id = $1 AND d.message_id = $2
 		ORDER BY a.attempted_at, a.id`, tenantID, messageID)
 	if err != nil {
 		return nil, wrap("read delivery attempts", err)
