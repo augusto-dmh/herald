@@ -14,6 +14,7 @@ Architecture-level decisions live in `docs/adr/`; entries here are cycle-scoped 
 | AD-006 | drover pinned `@main` pseudo-version until drover tags v0.1.0 | walking-skeleton context.md D-6 |
 | AD-007 | UUIDv7 via `github.com/google/uuid` | walking-skeleton context.md D-7 |
 | AD-008 | User-directed: foundation commits ride the cycle-A PR branch; `main` holds only the init commit until that PR merges (single PR, manual merge approval) | this session |
+| AD-009 | Message payload stored as `bytea` (JSON validated at ingest, bytes preserved verbatim): jsonb normalization would rewrite tenant bytes, and signing must cover the bytes the tenant sent | walking-skeleton review-triage.md #21 |
 
 ## Blockers
 
