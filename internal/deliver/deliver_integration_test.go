@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/augusto-dmh/drover"
 	"github.com/google/uuid"
@@ -374,6 +376,44 @@ func TestASecondExecutionOfADeliveryIsItsOwnAttempt(t *testing.T) {
 	}
 	if got := f.statusOf(t, delivery.ID); got != herald.DeliveryDelivered {
 		t.Errorf("delivery status = %q, want the last execution's outcome", got)
+	}
+}
+
+// An attempt is recorded whatever the receiver answered with. A body
+// full of NULs, cut mid-character at the capture cap, is exactly the
+// kind of answer that must not be able to strand a delivery pending by
+// making its attempt row unwritable.
+func TestAReceiverAnsweringRawBytesStillLeavesAnAttemptRow(t *testing.T) {
+	f := newFixture(t)
+	body := hostileBody()
+	endpoint := newReceiver(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write(body); err != nil {
+			t.Errorf("receiver: write body: %v", err)
+		}
+	})
+	delivery := f.deliveryTo(t, endpoint.url)
+
+	if err := run(t, f.worker(t, Config{}), delivery, 1); err != nil {
+		t.Fatalf("what the receiver put in its body failed the delivery: %v", err)
+	}
+
+	if got := f.statusOf(t, delivery.ID); got != herald.DeliveryDelivered {
+		t.Errorf("delivery status = %q, want delivered", got)
+	}
+	attempts := f.attemptsFor(t, delivery.ID)
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want exactly 1", len(attempts))
+	}
+	stored := attempts[0].ResponseSnippet
+	if !utf8.ValidString(stored) {
+		t.Errorf("the stored snippet is not valid UTF-8")
+	}
+	if strings.ContainsRune(stored, 0) {
+		t.Errorf("the stored snippet carries a NUL")
+	}
+	if !strings.Contains(stored, "x") {
+		t.Errorf("the readable part of the response was not stored: %q", stored)
 	}
 }
 

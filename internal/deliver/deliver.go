@@ -13,11 +13,15 @@ package deliver
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/augusto-dmh/drover"
 	"github.com/google/uuid"
@@ -37,6 +41,13 @@ const (
 	// archive what the receiver said, so a body larger than this is
 	// truncated and the outcome is decided by the status code either way.
 	snippetBytes = 4 << 10
+
+	// drainBytes is how much of the rest of a response body is read and
+	// thrown away before the connection is closed (ADR-0006). Draining is
+	// what lets the connection be kept and reused for the next delivery;
+	// past this much the read costs more than the connection is worth, so
+	// a longer body ends the connection instead.
+	drainBytes = 64 << 10
 )
 
 // Args is what an enqueued delivery job carries: the identifier of the
@@ -114,6 +125,15 @@ func (w *Worker) Work(ctx context.Context, job *drover.Job[Args]) error {
 	}
 
 	result := w.post(ctx, work.Endpoint.URL, work.Message.Payload)
+	if result.bodyErr != nil {
+		// A body that could not be finished does not change what the
+		// endpoint answered: the status code is the outcome. It is logged
+		// here rather than where it happened because this is where the
+		// identifiers that may name the destination are in scope.
+		w.log.Warn("read response body",
+			"delivery_id", work.Delivery.ID, "endpoint_id", work.Endpoint.ID,
+			"error", result.bodyErr)
+	}
 
 	attemptID, err := herald.NewID()
 	if err != nil {
@@ -145,8 +165,8 @@ func (w *Worker) Work(ctx context.Context, job *drover.Job[Args]) error {
 		w.log.Warn("delivery failed",
 			"delivery_id", work.Delivery.ID, "endpoint_id", work.Endpoint.ID,
 			"status_code", result.statusCode, "error", result.errorText)
-		return fmt.Errorf("deliver: delivery %s to %s: %s",
-			work.Delivery.ID, work.Endpoint.URL, result.errorText)
+		return fmt.Errorf("deliver: delivery %s to endpoint %s: %s",
+			work.Delivery.ID, work.Endpoint.ID, result.errorText)
 	}
 	return nil
 }
@@ -173,6 +193,12 @@ type outcome struct {
 	errorText  string
 	snippet    string
 	duration   time.Duration
+
+	// bodyErr is set when the response body could not be read as far as
+	// the snippet cap. It decides nothing — the status code is the
+	// outcome — and exists so the caller, which knows which delivery this
+	// was, can log it.
+	bodyErr error
 }
 
 // post sends the payload and reports what came back. It never returns
@@ -183,36 +209,60 @@ func (w *Worker) post(ctx context.Context, url string, payload []byte) outcome {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return outcome{errorText: err.Error(), duration: time.Since(start)}
+		return outcome{errorText: describe(err), duration: time.Since(start)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return outcome{errorText: err.Error(), duration: time.Since(start)}
+		return outcome{errorText: describe(err), duration: time.Since(start)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Only the snippet's worth of body is read. What is left unread is
-	// discarded with the connection rather than drained, which costs a
-	// connection and saves reading a body herald has no use for.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, snippetBytes))
-	if err != nil {
-		// A body that could not be finished does not change what the
-		// endpoint answered: the status code is the outcome.
-		w.log.Warn("read response body", "url", url, "error", err)
-	}
+	// The first snippetBytes of the body are kept for the attempt, then
+	// up to drainBytes more are read and thrown away so the connection
+	// can be reused. A body still going after that costs the connection,
+	// which is the cheaper of the two trades (ADR-0006).
+	body, bodyErr := io.ReadAll(io.LimitReader(resp.Body, snippetBytes))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, drainBytes))
 
 	code := resp.StatusCode
 	result := outcome{
 		statusCode: &code,
 		success:    code >= 200 && code < 300,
-		snippet:    string(body),
+		snippet:    snippetOf(body),
 		duration:   time.Since(start),
+		bodyErr:    bodyErr,
 	}
 	if !result.success {
 		result.errorText = fmt.Sprintf("endpoint responded %d %s",
 			code, http.StatusText(code))
 	}
 	return result
+}
+
+// snippetOf turns what a receiver answered into text that can actually
+// be stored. The body is bytes somebody else chose: it may hold NULs,
+// which a Postgres text column refuses outright, and cutting it at the
+// capture cap can leave a multibyte character in half. Neither is a
+// reason to lose the record of an attempt, so NULs are dropped and
+// anything that is not valid UTF-8 becomes the replacement character.
+func snippetOf(body []byte) string {
+	if !bytes.ContainsRune(body, 0) && utf8.Valid(body) {
+		return string(body)
+	}
+	return strings.ToValidUTF8(string(bytes.ReplaceAll(body, []byte{0}, nil)), "�")
+}
+
+// describe says what went wrong on the way to an endpoint without
+// naming the endpoint. A webhook URL is routinely a capability in
+// itself — whoever holds it can post to it — so it belongs in no log
+// line, no returned error and no stored row; the delivery and endpoint
+// identifiers are what say which destination this was.
+func describe(err error) string {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
+		return urlErr.Err.Error()
+	}
+	return err.Error()
 }
