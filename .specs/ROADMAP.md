@@ -6,7 +6,7 @@ Cycle definitions live in the accepted [RFC-0001 roadmap](../docs/rfc/0001-heral
 
 | tlc Cycle | RFC Cycle | Scope | Status |
 |---|---|---|---|
-| `walking-skeleton` | A | Schema, auth, management API, transactional ingest, unsigned delivery loop | Not started |
+| `walking-skeleton` | A | Schema, auth, management API, transactional ingest, unsigned delivery loop | Done (PR #1) |
 | `signing-and-secrets` | B | Standard Webhooks signing, secret rotation | Not started |
 | `retry-ladder-and-endpoint-health` | C | Retry policy, disabling, redelivery — **blocked on drover reliability core merging** | Not started |
 | `egress-hardening` | D | SSRF dialer, timeouts, politeness | Not started |
