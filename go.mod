@@ -3,6 +3,7 @@ module github.com/augusto-dmh/herald
 go 1.26.2
 
 require (
+	github.com/augusto-dmh/drover v0.0.0-20260725195602-7a3029706116
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/testcontainers/testcontainers-go v0.43.0
