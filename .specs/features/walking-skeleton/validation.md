@@ -66,3 +66,9 @@ Surviving mutants: 0.
 ## Gaps
 
 - **G1 (low)** — The spec-valued constants (1 MiB body cap, 15s delivery timeout) are asserted only relative to the implementation constants (`maxBodyBytes`, `DefaultTimeout`); a change to either constant would survive the suite. The values are correct today (`internal/httpapi/server.go:28`, `internal/deliver/deliver.go:33`). Fix-task: add unit assertions pinning `DefaultTimeout == 15*time.Second` and `maxBodyBytes == 1<<20` (or drive the cap test with a literal `1<<20` body). Does not gate: P4 AC1 is PARTIAL, not GAP.
+
+## Addendum — 2026-07-26
+
+Appended after the report above was written. The verifier's text is unchanged; this section only records what happened to a gap it identified.
+
+- **G1 is closed.** The fix landed in commit `12f3e06` ("test: pin the documented timeout and body-cap values"), which was authored after the verification pass produced the report and so is not reflected in it. `TestAnAttemptIsAlwaysBounded` (`internal/deliver/deliver_test.go`) now asserts `DefaultTimeout == 15 * time.Second`, and `TestABodyLargerThanTheCapIsRejectedWithoutBeingProcessed` (`internal/httpapi/server_test.go`) asserts `maxBodyBytes == 1<<20`. Changing either constant away from its documented value now fails the suite, which is what the fix-task asked for. On the strength of that, **P4 AC1 reads COVERED rather than PARTIAL** and this cycle's gap list is empty.
