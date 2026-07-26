@@ -62,6 +62,10 @@ func TestARouteTheAPIDoesNotServeIsReportedAsMissingInJSON(t *testing.T) {
 func TestABodyLargerThanTheCapIsRejectedWithoutBeingProcessed(t *testing.T) {
 	srv := newServer(t, Config{})
 
+	if maxBodyBytes != 1<<20 {
+		t.Errorf("body cap = %d, want the documented 1 MiB", maxBodyBytes)
+	}
+
 	decoded := false
 	handler := capBody(srv.handle(func(_ http.ResponseWriter, r *http.Request) error {
 		var body map[string]string

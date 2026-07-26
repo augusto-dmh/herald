@@ -214,6 +214,9 @@ func TestAnEndpointThatNeverAnswersIsRecordedWithNoStatusCode(t *testing.T) {
 // zero value is the documented deadline, never "wait forever".
 func TestAnAttemptIsAlwaysBounded(t *testing.T) {
 	t.Parallel()
+	if DefaultTimeout != 15*time.Second {
+		t.Errorf("default attempt budget = %v, want the documented 15s", DefaultTimeout)
+	}
 	if got := testWorker(t, Config{}).client.Timeout; got != DefaultTimeout {
 		t.Errorf("unconfigured timeout = %v, want %v", got, DefaultTimeout)
 	}
