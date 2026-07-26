@@ -10,7 +10,13 @@ import (
 	"github.com/augusto-dmh/herald/internal/herald"
 )
 
-const messageColumns = `id, tenant_id, application_id, event_type, payload, created_at`
+const (
+	messageColumns = `id, tenant_id, application_id, event_type, payload, created_at`
+	// The same columns for a query that joins messages to deliveries,
+	// where id, tenant_id and created_at exist on both tables.
+	messageColumnsQualified = `m.id, m.tenant_id, m.application_id, m.event_type, ` +
+		`m.payload, m.created_at`
+)
 
 func scanMessage(row pgx.Row) (herald.Message, error) {
 	var m herald.Message
@@ -55,7 +61,13 @@ func (s *Store) MessageByID(
 	return out, nil
 }
 
-const deliveryColumns = `id, tenant_id, message_id, endpoint_id, status, created_at, updated_at`
+const (
+	deliveryColumns = `id, tenant_id, message_id, endpoint_id, status, created_at, updated_at`
+	// The same columns for a query that joins deliveries to the endpoint
+	// and message they name.
+	deliveryColumnsQualified = `d.id, d.tenant_id, d.message_id, d.endpoint_id, d.status, ` +
+		`d.created_at, d.updated_at`
+)
 
 func scanDelivery(row pgx.Row) (herald.Delivery, error) {
 	var d herald.Delivery
@@ -110,6 +122,60 @@ func (s *Store) DeliveriesByMessage(
 		return nil, wrap("read deliveries", err)
 	}
 	return deliveries, nil
+}
+
+// DeliveryWork is everything one execution of a delivery needs: the
+// delivery itself, the endpoint it is addressed to, and the message it
+// carries.
+type DeliveryWork struct {
+	Delivery herald.Delivery
+	Endpoint herald.Endpoint
+	Message  herald.Message
+}
+
+// DeliveryWorkForJob reads a delivery and what it takes to run it, by
+// delivery id alone.
+//
+// It is the one read in this package that takes no tenant, and it is
+// unscoped by necessity rather than by convenience: a queue job carries
+// a delivery id and nothing else, so the tenant is not something the
+// worker could be asked to pass — it is something this read returns.
+// The rest of the rule still holds, because every row the worker then
+// writes is keyed to the tenant this read handed back, and nothing on
+// this path is ever reached by a request. Anything the API can reach
+// keeps its tenant-scoped variant.
+//
+// The state is read now rather than carried in the job, so a URL edited
+// between enqueue and execution is the URL herald POSTs to.
+func (s *Store) DeliveryWorkForJob(
+	ctx context.Context, deliveryID uuid.UUID,
+) (DeliveryWork, error) {
+	out, err := scanDeliveryWork(s.pool.QueryRow(ctx, `
+		SELECT `+deliveryColumnsQualified+`, `+endpointColumnsQualified+`, `+messageColumnsQualified+`
+		FROM deliveries d
+		JOIN endpoints e ON e.id = d.endpoint_id
+		JOIN messages m ON m.id = d.message_id
+		WHERE d.id = $1`, deliveryID))
+	if err != nil {
+		return DeliveryWork{}, wrap("read delivery work", err)
+	}
+	return out, nil
+}
+
+func scanDeliveryWork(row pgx.Row) (DeliveryWork, error) {
+	var w DeliveryWork
+	var payload []byte
+	err := row.Scan(
+		&w.Delivery.ID, &w.Delivery.TenantID, &w.Delivery.MessageID, &w.Delivery.EndpointID,
+		&w.Delivery.Status, &w.Delivery.CreatedAt, &w.Delivery.UpdatedAt,
+		&w.Endpoint.ID, &w.Endpoint.TenantID, &w.Endpoint.ApplicationID, &w.Endpoint.URL,
+		&w.Endpoint.Description, &w.Endpoint.FilterTypes, &w.Endpoint.Disabled,
+		&w.Endpoint.CreatedAt,
+		&w.Message.ID, &w.Message.TenantID, &w.Message.ApplicationID, &w.Message.EventType,
+		&payload, &w.Message.CreatedAt,
+	)
+	w.Message.Payload = payload
+	return w, err
 }
 
 // UpdateDeliveryStatus moves a delivery to its outcome. The delivery is

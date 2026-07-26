@@ -48,7 +48,13 @@ func (s *Store) ApplicationByUID(
 	return out, nil
 }
 
-const endpointColumns = `id, tenant_id, application_id, url, description, filter_types, disabled, created_at`
+const (
+	endpointColumns = `id, tenant_id, application_id, url, description, filter_types, disabled, created_at`
+	// The same columns for a query that joins endpoints to deliveries,
+	// where id, tenant_id and created_at exist on both tables.
+	endpointColumnsQualified = `e.id, e.tenant_id, e.application_id, e.url, e.description, ` +
+		`e.filter_types, e.disabled, e.created_at`
+)
 
 func scanEndpoint(row pgx.Row) (herald.Endpoint, error) {
 	var e herald.Endpoint
