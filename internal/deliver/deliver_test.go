@@ -96,8 +96,8 @@ func TestTheAnsweredStatusDecidesWhetherADeliverySucceeded(t *testing.T) {
 			if !c.wantSuccess && got.errorText == "" {
 				t.Errorf("a failed attempt says nothing about why")
 			}
-			if got.duration < 0 {
-				t.Errorf("duration = %v", got.duration)
+			if got.duration <= 0 {
+				t.Errorf("attempt duration = %v, want the time the round trip took", got.duration)
 			}
 		})
 	}
@@ -368,6 +368,31 @@ func TestAnAttemptIsAlwaysBounded(t *testing.T) {
 	}
 	if got := testWorker(t, Config{Timeout: 2 * time.Second}).client.Timeout; got != 2*time.Second {
 		t.Errorf("configured timeout = %v, want 2s", got)
+	}
+}
+
+// The queue counts executions from one. The floor is here because the
+// schema refuses an attempt numbered zero, and losing the record of a
+// delivery over an off-by-one is worse than filing it as the first.
+func TestAnAttemptIsNumberedFromOneWhateverTheQueueCounted(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		counted int
+		want    int
+	}{
+		"a queue that has not counted yet": {0, 1},
+		"a nonsense count":                 {-3, 1},
+		"the first execution":              {1, 1},
+		"the second execution":             {2, 2},
+		"the last of the ladder":           {8, 8},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := attemptNumber(c.counted); got != c.want {
+				t.Errorf("execution %d recorded as attempt %d, want %d", c.counted, got, c.want)
+			}
+		})
 	}
 }
 

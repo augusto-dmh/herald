@@ -170,6 +170,34 @@ func unreachableURL(t *testing.T) string {
 	return url
 }
 
+// countRows reports how many rows a table holds.
+func (f *fixture) countRows(t *testing.T, table string) int {
+	t.Helper()
+	var count int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM `+table).Scan(&count); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return count
+}
+
+// One execution leaves one attempt — except when there is nothing to
+// leave it against. A job naming a delivery herald cannot read has no
+// tenant, no endpoint and no message, so there is no row it could
+// honestly write; the queue is told the job failed and the log stays
+// empty rather than gaining an attempt at a delivery that is not there.
+func TestAJobNamingADeliveryHeraldCannotReadRecordsNothing(t *testing.T) {
+	f := newFixture(t)
+	missing := herald.Delivery{ID: newID(t)}
+
+	if err := run(t, f.worker(t, Config{}), missing, 1); err == nil {
+		t.Errorf("the queue was told a job for an unknown delivery succeeded")
+	}
+	if got := f.countRows(t, "delivery_attempts"); got != 0 {
+		t.Errorf("delivery_attempts holds %d rows, want none: there was nothing to attempt", got)
+	}
+}
+
 // A delivery the endpoint accepted leaves one attempt saying so and a
 // delivery marked delivered, and the queue is told the job succeeded.
 func TestAnAcceptedMessageIsRecordedOnceAndMarkedDelivered(t *testing.T) {

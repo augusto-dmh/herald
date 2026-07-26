@@ -86,7 +86,7 @@ func TestTheWrongBootstrapTokenIsRefused(t *testing.T) {
 
 // A deployment with no bootstrap token configured is one where nobody
 // can bootstrap, rather than one where anybody can.
-func TestWithNoBootstrapTokenConfiguredNoTokenOpensTheRoute(t *testing.T) {
+func TestAnUnconfiguredBootstrapTokenClosesTenantCreationToEveryone(t *testing.T) {
 	srv := newServer(t, Config{})
 
 	reached := false

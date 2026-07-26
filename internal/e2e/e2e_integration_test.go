@@ -362,8 +362,14 @@ func TestAPostedMessageReachesItsEndpointAndTheAttemptIsQueryable(t *testing.T) 
 	if made.AttemptNumber != 1 {
 		t.Errorf("attempt number = %d, want 1", made.AttemptNumber)
 	}
-	if made.DurationMS < 0 {
-		t.Errorf("attempt duration = %dms", made.DurationMS)
+	// The reported duration is a measurement of the round trip. It is
+	// bounded rather than required to be positive because a delivery to
+	// a receiver on this machine can legitimately take under a
+	// millisecond and round to zero; what it cannot be is negative, or
+	// longer than an attempt is allowed to last.
+	if made.DurationMS < 0 || made.DurationMS > deliver.DefaultTimeout.Milliseconds() {
+		t.Errorf("attempt duration = %dms, want a measurement within the %v an attempt may take",
+			made.DurationMS, deliver.DefaultTimeout)
 	}
 
 	// The message really travelled: the receiver was called once, with

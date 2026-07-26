@@ -365,6 +365,79 @@ func TestAMessageReportsEveryDeliveryAndWhatEachAttemptDid(t *testing.T) {
 	}
 }
 
+// An id that is not an identifier names nothing, and is answered the
+// same way as one naming another tenant's message: a caller learns
+// nothing from the difference between a malformed id and a real one it
+// may not have.
+func TestAMessageIDThatIsNotAnIdentifierIsAnsweredAsMissing(t *testing.T) {
+	a := newAPI(t)
+	tenant, key := a.newTenant(t, "acme", herald.ScopeFull)
+	a.createApp(t, key, "billing")
+	message, _, _ := a.seedMessage(t, tenant.ID, "billing")
+
+	for _, id := range []string{"not-an-id", "42", "0", message.ID.String() + "x"} {
+		rec := a.do(t, http.MethodGet, "/v1/applications/billing/messages/"+id, key, "")
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("message id %q: status = %d, want %d (%s)",
+				id, rec.Code, http.StatusNotFound, rec.Body)
+		}
+		var envelope errorEnvelope
+		decodeBody(t, rec, &envelope)
+		if envelope.Error.Code != "not_found" {
+			t.Errorf("message id %q: error code = %q, want not_found", id, envelope.Error.Code)
+		}
+	}
+
+	// The route works for a well-formed id the caller does own, so the
+	// answers above are refusals rather than a route that never serves.
+	rec := a.do(t, http.MethodGet, "/v1/applications/billing/messages/"+message.ID.String(), key, "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("the owner could not read its own message: status %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+// Registering an endpoint decides where a tenant's messages are sent,
+// which is management authority. A key that may only submit messages
+// is a valid credential that may not do it — a different answer from
+// one herald does not recognize at all.
+func TestRegisteringAnEndpointRefusesAKeyThatMayOnlyIngest(t *testing.T) {
+	a := newAPI(t)
+	tenant, ingestKey := a.newTenant(t, "acme", herald.ScopeIngest)
+
+	// The application exists, so a refusal can only be about the scope.
+	if _, err := a.store.CreateApplication(context.Background(), herald.Application{
+		ID: newID(t), TenantID: tenant.ID, UID: "billing", Name: "Billing",
+	}); err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		credential string
+		want       int
+		wantCode   string
+	}{
+		{"an ingest key", ingestKey, http.StatusForbidden, "forbidden"},
+		{"no key", "", http.StatusUnauthorized, "unauthorized"},
+		{"an unissued key", herald.APIKeyPrefix + "nothing", http.StatusUnauthorized, "unauthorized"},
+	}
+	for _, c := range cases {
+		rec := a.do(t, http.MethodPost, "/v1/applications/billing/endpoints", c.credential,
+			`{"url":"https://acme.example.com/hooks"}`)
+		if rec.Code != c.want {
+			t.Errorf("%s: status = %d, want %d (%s)", c.name, rec.Code, c.want, rec.Body)
+		}
+		var envelope errorEnvelope
+		decodeBody(t, rec, &envelope)
+		if envelope.Error.Code != c.wantCode {
+			t.Errorf("%s: error code = %q, want %q", c.name, envelope.Error.Code, c.wantCode)
+		}
+	}
+	if got := a.countRows(t, "endpoints"); got != 0 {
+		t.Errorf("endpoints = %d after refused requests, want 0", got)
+	}
+}
+
 func TestManagementRefusesAKeyThatMayOnlyIngest(t *testing.T) {
 	a := newAPI(t)
 	_, ingestKey := a.newTenant(t, "acme", herald.ScopeIngest)
