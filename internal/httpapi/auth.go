@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -70,7 +71,35 @@ func (s *Server) authenticate(r *http.Request) (herald.APIKey, error) {
 	if err != nil {
 		return herald.APIKey{}, err
 	}
+	s.recordKeyUse(r, key)
 	return key, nil
+}
+
+// apiKeyTouchInterval is how stale a key's recorded last use may become
+// before authentication refreshes it. What the timestamp answers is
+// "has anything used this credential lately?", which an operator asks
+// before revoking a key — a question minutes are precise enough for.
+// Recording every request instead would turn one busy key into an
+// endless stream of updates to a single row, which is a contention and
+// bloat source paid for nothing (ADR-0002).
+const apiKeyTouchInterval = time.Minute
+
+// recordKeyUse notes that a credential was used, at most once per
+// apiKeyTouchInterval per key.
+//
+// It is deliberately best-effort. The caller has already been
+// authenticated by the time this runs, and an audit timestamp that
+// could not be written is not a reason to refuse a request that is
+// otherwise entitled to be served: failing here would turn a
+// bookkeeping problem into an outage.
+func (s *Server) recordKeyUse(r *http.Request, key herald.APIKey) {
+	now := time.Now()
+	if key.LastUsedAt != nil && now.Sub(*key.LastUsedAt) < apiKeyTouchInterval {
+		return
+	}
+	if err := s.store.TouchAPIKey(r.Context(), key.ID, now); err != nil {
+		s.log.Warn("record api key use", "api_key_id", key.ID, "error", err)
+	}
 }
 
 // requireBootstrapToken guards tenant creation, the one operation with

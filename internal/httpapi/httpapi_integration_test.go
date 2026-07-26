@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/augusto-dmh/drover"
 	"github.com/google/uuid"
@@ -144,6 +145,83 @@ func TestAKeyIsAnsweredAsTheTenantThatWasIssuedIt(t *testing.T) {
 		if seen.scope != herald.ScopeFull {
 			t.Errorf("%s's key ran with scope %q, want full", want.tenant.Name, seen.scope)
 		}
+	}
+}
+
+// An operator about to revoke a key needs to know whether anything is
+// still using it, which is what last_used_at answers. Answering it
+// costs one write per key per interval, not one per request: a key
+// carrying an application's whole traffic must not turn every call
+// into an update of the same row.
+func TestUsingAKeyIsRecordedButNotOnceARequest(t *testing.T) {
+	a := newAPI(t)
+	_, key := a.newTenant(t, "acme", herald.ScopeFull)
+	ctx := context.Background()
+
+	lastUsed := func() *time.Time {
+		t.Helper()
+		stored, err := a.store.APIKeyByHash(ctx, herald.HashAPIKey(key))
+		if err != nil {
+			t.Fatalf("read the key back: %v", err)
+		}
+		return stored.LastUsedAt
+	}
+	authenticate := func() {
+		t.Helper()
+		if rec := a.do(t, http.MethodPost, "/v1/applications", key,
+			`{"uid":"`+uuid.NewString()+`","name":"Billing"}`); rec.Code != http.StatusCreated {
+			t.Fatalf("authenticate: status %d (%s)", rec.Code, rec.Body)
+		}
+	}
+
+	if got := lastUsed(); got != nil {
+		t.Fatalf("a key reports last use at %v before it was ever used", got)
+	}
+
+	authenticate()
+	first := lastUsed()
+	if first == nil {
+		t.Fatalf("a key that authenticated a request is still recorded as never used")
+	}
+
+	authenticate()
+	if second := lastUsed(); second == nil || !second.Equal(*first) {
+		t.Errorf("last use moved from %v to %v on a request moments later, want one write per %v",
+			first, second, apiKeyTouchInterval)
+	}
+
+	// Once the record is older than the interval, the next request
+	// refreshes it — the throttle delays the write, it does not skip it.
+	stale := first.Add(-2 * apiKeyTouchInterval)
+	if _, err := a.pool.Exec(ctx,
+		`UPDATE api_keys SET last_used_at = $2 WHERE key_hash = $1`,
+		herald.HashAPIKey(key), stale); err != nil {
+		t.Fatalf("age the recorded use: %v", err)
+	}
+	authenticate()
+	if got := lastUsed(); got == nil || !got.After(stale) {
+		t.Errorf("last use is still %v after a request past the interval, want it refreshed", got)
+	}
+}
+
+// A key's audit trail is bookkeeping, not a precondition. A request
+// that has been authenticated is served even when the timestamp behind
+// it cannot be written.
+func TestARequestIsServedEvenIfItsKeysLastUseCannotBeRecorded(t *testing.T) {
+	a := newAPI(t)
+	_, key := a.newTenant(t, "acme", herald.ScopeFull)
+	ctx := context.Background()
+
+	// Nothing may update the column from here on.
+	if _, err := a.pool.Exec(ctx, `
+		CREATE RULE no_touch AS ON UPDATE TO api_keys DO INSTEAD NOTHING`); err != nil {
+		t.Fatalf("block the audit write: %v", err)
+	}
+
+	rec := a.do(t, http.MethodPost, "/v1/applications", key, `{"uid":"billing","name":"Billing"}`)
+	if rec.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d: a failed audit write refused an authenticated request (%s)",
+			rec.Code, http.StatusCreated, rec.Body)
 	}
 }
 
